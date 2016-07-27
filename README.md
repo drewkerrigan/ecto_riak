@@ -7,6 +7,11 @@ Provides Ecto adapters for Riak (KV), RiakTS, and RiakSearch
 Setup
 
 ```
+riak-admin bucket-type create GeoCheckin '{"props":{"table_def": "CREATE TABLE GeoCheckin (region VARCHAR NOT NULL, state VARCHAR NOT NULL, time TIMESTAMP NOT NULL, weather VARCHAR NOT NULL, temperature DOUBLE, PRIMARY KEY ((region, state, QUANTUM(time, 15, 'm')), region, state, time))"}}'
+riak-admin bucket-type activate GeoCheckin
+```
+
+```
 defmodule TestRepo do
   use Ecto.Repo, otp_app: :ecto, adapter: Ecto.Adapters.RiakTS
 end
