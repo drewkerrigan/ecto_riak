@@ -3,8 +3,6 @@ defmodule Ecto.Adapters.RiakTS do
   Adapter module for RiakTS.
   """
 
-  require Logger
-
   import Ecto.Adapters.RiakTS.SQL, only: [to_sql: 1]
 
   @behaviour Ecto.Adapter
@@ -18,7 +16,7 @@ defmodule Ecto.Adapters.RiakTS do
   end
 
   def child_spec(_repo, options) do
-    Ecto.Adapters.RiakTS.Connection.child_spec(options)
+    Ecto.Riak.Connection.child_spec(options)
   end
 
   ## Types

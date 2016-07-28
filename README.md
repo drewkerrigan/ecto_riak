@@ -26,7 +26,7 @@ Configure
 Examples of adapter configuration options can be found [here](config/config.exs). Create a `config/config.exs`:
 
 ```
-config :ecto, EctoRiak.TestRepo,
+config :ecto, EctoRiak.RiakTSRepo,
   adapter: Ecto.Adapters.RiakTS,
   hostname: "localhost",
   port: 8087,
@@ -37,7 +37,7 @@ config :ecto, EctoRiak.TestRepo,
 Create a repo
 
 ```
-defmodule TestRepo do
+defmodule RiakTSRepo do
   use Ecto.Repo, otp_app: :ecto, adapter: Ecto.Adapters.RiakTS
 end
 
@@ -59,13 +59,13 @@ end
 Start
 
 ```
-EctoRiak.TestRepo.start_link()
+EctoRiak.RiakTSRepo.start_link()
 ```
 
 or to override configured host / port:
 
 ```
-{:ok, pid } = EctoRiak.TestRepo.start_link(url: "ecto://locahost:8087/default")
+{:ok, pid } = EctoRiak.RiakTSRepo.start_link(url: "ecto://locahost:8087/default")
 ```
 
 
@@ -81,13 +81,13 @@ row = %MySchema{
   weather: "sunny",
   temperature: 65.0
 }
-TestRepo.insert!(row)
+RiakTSRepo.insert!(row)
 ```
 
 Multiple Rows
 
 ```
-TestRepo.insert_all(MySchema,
+RiakTSRepo.insert_all(MySchema,
   [%{region: "myregion2",
      state: "mystate2",
      time: 123457,
@@ -103,13 +103,13 @@ TestRepo.insert_all(MySchema,
 ### Get Row
 
 ```
-TestRepo.get_by(MySchema, region: "myregion", state: "mystate", time: 123456)
+RiakTSRepo.get_by(MySchema, region: "myregion", state: "mystate", time: 123456)
 ```
 
 ### Delete Row
 
 ```
-TestRepo.delete!(row)
+RiakTSRepo.delete!(row)
 ```
 
 ### Query
@@ -121,5 +121,5 @@ query =
         e.state == "mystate" and
         e.time > 123455 and
         e.time < 123459)
-TestRepo.all(query)
+RiakTSRepo.all(query)
 ```

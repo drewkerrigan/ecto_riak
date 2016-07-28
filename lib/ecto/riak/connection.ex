@@ -1,4 +1,4 @@
-defmodule Ecto.Adapters.RiakTS.Connection do
+defmodule Ecto.Riak.Connection do
 
   def child_spec(options) do
     # All connections handled through pooler

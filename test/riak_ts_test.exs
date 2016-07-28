@@ -1,8 +1,8 @@
-defmodule EctoRiakTest do
+defmodule EctoRiakTSTest do
   use EctoRiak.Case
 
   import Ecto.Query
-  require EctoRiak.TestRepo, as: TestRepo
+  require EctoRiak.RiakTSRepo, as: RiakTSRepo
 
   defmodule MySchema do
     use Ecto.Schema
@@ -26,9 +26,9 @@ defmodule EctoRiakTest do
       weather: "sunny",
       temperature: 65.0
     }
-    inserted_row = TestRepo.insert!(row)
+    inserted_row = RiakTSRepo.insert!(row)
     assert row.region == inserted_row.region
-    assert {2, nil} == TestRepo.insert_all(MySchema,
+    assert {2, nil} == RiakTSRepo.insert_all(MySchema,
       [%{region: "myregion2",
          state: "mystate2",
          time: 123457,
@@ -39,9 +39,9 @@ defmodule EctoRiakTest do
          time: 123458,
          weather: "rainy",
          temperature: 45.0}])
-    returned_row = TestRepo.get_by(MySchema, region: "myregion", state: "mystate", time: 123456)
+    returned_row = RiakTSRepo.get_by(MySchema, region: "myregion", state: "mystate", time: 123456)
     assert row.region == returned_row.region
-    deleted_row = TestRepo.delete!(row)
+    deleted_row = RiakTSRepo.delete!(row)
     assert :deleted == deleted_row.__meta__.state
   end
 
@@ -53,14 +53,14 @@ defmodule EctoRiakTest do
       weather: "sunny",
       temperature: 65.0
     }
-    |> TestRepo.insert!
+    |> RiakTSRepo.insert!
     query = from(e in MySchema, where:
       e.region == "myregion" and
       e.state == "mystate" and
       e.time > 123455 and
       e.time < 123459)
 
-    [result] = TestRepo.all(query)
+    [result] = RiakTSRepo.all(query)
     assert "myregion" == result.region
   end
 end
