@@ -1,7 +1,6 @@
 defmodule EctoRiakTest do
   use EctoRiak.Case
 
-  import Ecto, only: [put_meta: 2]
   import Ecto.Query
   require EctoRiak.TestRepo, as: TestRepo
 

@@ -6,6 +6,8 @@ Provides Ecto adapters for Riak (KV), RiakTS, and RiakSearch
 
 Setup
 
+Create a table
+
 ```
 riak-admin bucket-type create GeoCheckin '{"props":{"table_def": 
     "CREATE TABLE GeoCheckin (
@@ -18,6 +20,21 @@ riak-admin bucket-type create GeoCheckin '{"props":{"table_def":
         region, state, time))"}}'
 riak-admin bucket-type activate GeoCheckin
 ```
+
+Configure
+
+Examples of adapter configuration options can be found [here](config/config.exs). Create a `config/config.exs`:
+
+```
+config :ecto, EctoRiak.TestRepo,
+  adapter: Ecto.Adapters.RiakTS,
+  hostname: "localhost",
+  port: 8087,
+  init_count: 5,
+  max_count: 10
+```
+
+Create a repo
 
 ```
 defmodule TestRepo do
@@ -42,8 +59,15 @@ end
 Start
 
 ```
-EctoRiak.TestRepo.start_link([])
+EctoRiak.TestRepo.start_link()
 ```
+
+or to override configured host / port:
+
+```
+{:ok, pid } = EctoRiak.TestRepo.start_link(url: "ecto://locahost:8087/default")
+```
+
 
 ### Insert Rows
 
