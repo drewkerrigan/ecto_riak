@@ -3,141 +3,141 @@ defmodule Ecto.Adapters.RiakKV do
   Adapter module for Riak (KV).
   """
 
-  require Logger
+  # require Logger
 
-  @behaviour Ecto.Adapter
+  # @behaviour Ecto.Adapter
 
-  defmacro __before_compile__(_env) do
-    :ok
-  end
+  # defmacro __before_compile__(_env) do
+  #   :ok
+  # end
 
-  def ensure_all_started(_, _options) do
-    {:ok, []}
-  end
+  # def ensure_all_started(_, _options) do
+  #   {:ok, []}
+  # end
 
-  def child_spec(_repo, options) do
-    Ecto.Riak.Connection.child_spec(options)
-  end
+  # def child_spec(_repo, options) do
+  #   Ecto.Riak.Connection.child_spec(options)
+  # end
 
-  ## Types
+  # ## Types
 
-  def loaders(:binary_id, type), do: [Ecto.UUID, type]
-  def loaders(_primitive, type), do: [type]
+  # def loaders(:binary_id, type), do: [Ecto.UUID, type]
+  # def loaders(_primitive, type), do: [type]
 
-  def dumpers(:binary_id, type), do: [type, Ecto.UUID]
-  def dumpers(_primitive, type), do: [type]
+  # def dumpers(:binary_id, type), do: [type, Ecto.UUID]
+  # def dumpers(_primitive, type), do: [type]
 
-  def autogenerate(:id), do: nil
-  def autogenerate(:embed_id), do: Ecto.UUID.autogenerate
-  def autogenerate(:binary_id), do: Ecto.UUID.autogenerate
+  # def autogenerate(:id), do: nil
+  # def autogenerate(:embed_id), do: Ecto.UUID.autogenerate
+  # def autogenerate(:binary_id), do: Ecto.UUID.autogenerate
 
-  ## Queryable
+  # ## Queryable
 
-  def prepare(operation, query), do: {:nocache, {operation, query}}
+  # def prepare(operation, query), do: {:nocache, {operation, query}}
 
-  def execute(_repo,
-        %{fields: fields},
-        {:nocache, {:all, query}}, [], process, _options) do
-    Logger.info("Execute query")
-    # case Riak.Timeseries.query(sql) do
-    #   {_fields, []} -> {0, []};
-    #   {:error, {_, message}} ->
-    #     raise Ecto.QueryError, query: query, message: message <> " Generated SQL: '#{sql}'"
-    #   {_fields, raw_rows} ->
-    #     {rows, count} = Enum.map_reduce(raw_rows, 0, &{process_row(&1, process, fields), &2 + 1})
-    #     {count, rows}
-    # end
-    {0, nil}
-  end
+  # def execute(_repo,
+  #       %{fields: fields},
+  #       {:nocache, {:all, query}}, [], process, _options) do
+  #   Logger.info("Execute query")
+  #   # case Riak.Timeseries.query(sql) do
+  #   #   {_fields, []} -> {0, []};
+  #   #   {:error, {_, message}} ->
+  #   #     raise Ecto.QueryError, query: query, message: message <> " Generated SQL: '#{sql}'"
+  #   #   {_fields, raw_rows} ->
+  #   #     {rows, count} = Enum.map_reduce(raw_rows, 0, &{process_row(&1, process, fields), &2 + 1})
+  #   #     {count, rows}
+  #   # end
+  #   {0, nil}
+  # end
 
-  def execute(_repo,
-        %{fields: fields,
-          sources: {{table, schema}}},
-        {:nocache, {:all, _query}}, params, process, _options) do
-    Logger.info("Execute get_by")
-    # pk = schema.__schema__(:primary_key)
-    # case length(params) == length(pk) do
-    #   false ->
-    #     raise ArgumentError, "RiakTS only supports gets with a full primary key (#{inspect pk})";
-    #   true ->
-    #     case Riak.Timeseries.get(table, params) do
-    #       {_fields, []} -> {0, []};
-    #       {:error, {_, message}} ->
-    #         raise ArgumentError, message;
-    #       {_fields, raw_rows} ->
-    #         {rows, count} = Enum.map_reduce(raw_rows, 0, &{process_row(&1, process, fields), &2 + 1})
-    #         {count, rows}
-    #     end
-    # end
-  end
+  # def execute(_repo,
+  #       %{fields: fields,
+  #         sources: {{table, schema}}},
+  #       {:nocache, {:all, _query}}, params, process, _options) do
+  #   Logger.info("Execute get_by")
+  #   # pk = schema.__schema__(:primary_key)
+  #   # case length(params) == length(pk) do
+  #   #   false ->
+  #   #     raise ArgumentError, "RiakTS only supports gets with a full primary key (#{inspect pk})";
+  #   #   true ->
+  #   #     case Riak.Timeseries.get(table, params) do
+  #   #       {_fields, []} -> {0, []};
+  #   #       {:error, {_, message}} ->
+  #   #         raise ArgumentError, message;
+  #   #       {_fields, raw_rows} ->
+  #   #         {rows, count} = Enum.map_reduce(raw_rows, 0, &{process_row(&1, process, fields), &2 + 1})
+  #   #         {count, rows}
+  #   #     end
+  #   # end
+  # end
 
-  def execute(_, _, _, _, _) do
-    {:error, "Not implemented"}
-  end
+  # def execute(_, _, _, _, _) do
+  #   {:error, "Not implemented"}
+  # end
 
-  ## Schema
+  # ## Schema
 
-  def insert(_repo, %{source: {_, table}, schema: schema}, row, _returning, _options) do
-    Logger.info("Insert, #{inspect row}")
-    # fields = schema.__schema__(:fields)
-    # tuple_row = convert_row(fields, row)
-    # case Riak.Timeseries.put(table, [tuple_row]) do
-    #   :ok -> {:ok, []};
-    #   {:error, {_, message}} ->
-    #     raise ArgumentError, message
-    # end
-    {:ok, []}
-  end
+  # def insert(_repo, %{source: {_, table}, schema: schema}, row, _returning, _options) do
+  #   Logger.info("Insert, #{inspect row}")
+  #   # fields = schema.__schema__(:fields)
+  #   # tuple_row = convert_row(fields, row)
+  #   # case Riak.Timeseries.put(table, [tuple_row]) do
+  #   #   :ok -> {:ok, []};
+  #   #   {:error, {_, message}} ->
+  #   #     raise ArgumentError, message
+  #   # end
+  #   {:ok, []}
+  # end
 
-  def insert_all(_repo, %{source: {_, table}, schema: schema},
-        _header, rows, returning, _options) do
-    Logger.info("Insert all")
-    # fields = schema.__schema__(:fields)
-    # tuple_rows = Enum.map rows, fn r -> convert_row(fields, r) end
-    # case Riak.Timeseries.put(table, tuple_rows) do
-    #   :ok ->
-    #     case returning do
-    #       [] ->
-    #         {length(rows), nil}
-    #       return_fields ->
-    #         return_values = Enum.map rows, fn r ->
-    #           Enum.map return_fields, fn f ->
-    #             {f, r[f]}
-    #           end
-    #         end
-    #         {length(rows), return_values}
-    #     end
-    #   {:error, {_, message}} -> {:invalid, message}
-    # end
-    {0, nil}
-  end
+  # def insert_all(_repo, %{source: {_, table}, schema: schema},
+  #       _header, rows, returning, _options) do
+  #   Logger.info("Insert all")
+  #   # fields = schema.__schema__(:fields)
+  #   # tuple_rows = Enum.map rows, fn r -> convert_row(fields, r) end
+  #   # case Riak.Timeseries.put(table, tuple_rows) do
+  #   #   :ok ->
+  #   #     case returning do
+  #   #       [] ->
+  #   #         {length(rows), nil}
+  #   #       return_fields ->
+  #   #         return_values = Enum.map rows, fn r ->
+  #   #           Enum.map return_fields, fn f ->
+  #   #             {f, r[f]}
+  #   #           end
+  #   #         end
+  #   #         {length(rows), return_values}
+  #   #     end
+  #   #   {:error, {_, message}} -> {:invalid, message}
+  #   # end
+  #   {0, nil}
+  # end
 
-  # Notice the list of changes is never empty.
-  def update(_repo, %{context: nil}, [_|_], _filters, return, _options) do
-    Logger.info("Update")
-    # do: send(self(), :update) && {:ok, Enum.zip(return, 1..length(return))}
-  end
+  # # Notice the list of changes is never empty.
+  # def update(_repo, %{context: nil}, [_|_], _filters, return, _options) do
+  #   Logger.info("Update")
+  #   # do: send(self(), :update) && {:ok, Enum.zip(return, 1..length(return))}
+  # end
 
-  def update(_repo, %{context: {:invalid, _}=res}, [_|_], _filters, _return, _options) do
-    Logger.info("Update res")
-    # do: res
-  end
+  # def update(_repo, %{context: {:invalid, _}=res}, [_|_], _filters, _return, _options) do
+  #   Logger.info("Update res")
+  #   # do: res
+  # end
 
-  def delete(_repo, %{source: {_, table}, schema: schema}, filter, _options) do
-    Logger.info("Delete")
-    {:ok, []}
-    # pk = schema.__schema__(:primary_key)
-    # case to_pk(pk, filter, []) do
-    #   {:invalid, _} = e -> e;
-    #   key ->
-    #     case Riak.Timeseries.delete(table, key) do
-    #       :ok -> {:ok, []};
-    #       {:error, {_, "notfound"}} -> {:error, :stale};
-    #       {:error, {_, message}} ->
-    #         raise ArgumentError, message
-    #     end
-    # end
-  end
+  # def delete(_repo, %{source: {_, table}, schema: schema}, filter, _options) do
+  #   Logger.info("Delete")
+  #   {:ok, []}
+  #   # pk = schema.__schema__(:primary_key)
+  #   # case to_pk(pk, filter, []) do
+  #   #   {:invalid, _} = e -> e;
+  #   #   key ->
+  #   #     case Riak.Timeseries.delete(table, key) do
+  #   #       :ok -> {:ok, []};
+  #   #       {:error, {_, "notfound"}} -> {:error, :stale};
+  #   #       {:error, {_, message}} ->
+  #   #         raise ArgumentError, message
+  #   #     end
+  #   # end
+  # end
 
   ## Private
 

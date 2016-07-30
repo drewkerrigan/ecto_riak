@@ -10,3 +10,8 @@ config :ecto, EctoRiak.RiakKVRepo,
   adapter: Ecto.Adapters.RiakKV,
   host: "localhost",
   port: 8087
+
+config :ecto, EctoRiak.RiakDTRepo,
+  adapter: Ecto.Adapters.RiakDT,
+  host: "localhost",
+  port: 8087
