@@ -75,6 +75,7 @@ defmodule Ecto.Adapters.RiakDT do
             Map.put(a, Atom.to_string(k), v)
         end
       end)
+      Logger.info("Loaded map: #{inspect data}")
       {:ok, data}
       data ->
         {:ok, data}
@@ -93,9 +94,12 @@ defmodule Ecto.Adapters.RiakDT do
   def dumpers(:string, _type) do
     [fn
       rec when Record.is_record(rec, :register) ->
+        Logger.info("STRING DATA1: #{inspect rec}")
         {:ok, rec}
       data ->
-        {:ok, Riak.CRDT.Register.new |> Riak.CRDT.Register.set(data)}
+        Logger.info("STRING DATA2: #{inspect data}")
+        # {:ok, Riak.CRDT.Register.new |> Riak.CRDT.Register.set(data)}
+        {:ok, :riakc_register.new(data, :undefined)}
     end]
   end
   def dumpers({:array, :string}, _type) do
@@ -123,24 +127,28 @@ defmodule Ecto.Adapters.RiakDT do
       rec when Record.is_record(rec, :map) ->
         {:ok, rec}
       data ->
-        data = Enum.reduce(types, Riak.CRDT.Map.new, fn ({k, t}, a) ->
-      [f] = dumpers(t, t)
-      {:ok, raw} = Map.fetch(data, k)
-      case f do
-        Ecto.Riak.Counter ->
-          Riak.CRDT.Map.put(a, Atom.to_string(k), raw)
-        fun ->
-          {:ok, v} = f.(raw)
-          Riak.CRDT.Map.put(a, Atom.to_string(k), v)
-      end
-    end)
+        m = case Map.fetch(data, :_context) do
+              {:ok, c} -> :riakc_map.new(c)
+              _ -> Riak.CRDT.Map.new
+            end
+        data = Enum.reduce(types, m, fn ({k, t}, a) ->
+          [f] = dumpers(t, t)
+          {:ok, raw} = Map.fetch(data, k)
+          case f do
+            Ecto.Riak.Counter ->
+              Riak.CRDT.Map.put(a, Atom.to_string(k), raw)
+            fun ->
+              {:ok, v} = f.(raw)
+              Riak.CRDT.Map.put(a, Atom.to_string(k), v)
+          end
+        end)
       {:ok, data}
     end]
   end
   def dumpers(_primitive, type), do: [type]
 
   def autogenerate(:id), do: nil
-  def autogenerate(:embed_id), do: Ecto.UUID.autogenerate
+  def autogenerate(:embed_id), do: :riakc_register.new(Ecto.UUID.autogenerate, :undefined)
   def autogenerate(:binary_id), do: Ecto.UUID.autogenerate
 
   ## Queryable
@@ -177,13 +185,18 @@ defmodule Ecto.Adapters.RiakDT do
       map ->
         [f|_] = loaders({:embed, %{related: schema}}, nil)
         {:ok, row} = f.(map)
-        Logger.info("Fields: #{inspect fields}")
         ordered_fields = schema.__schema__(:fields)
         values = Enum.map(ordered_fields, fn f ->
           Map.get(row, Atom.to_string(f))
         end)
         Logger.info("Values: #{inspect values}")
-        {rows, count} = Enum.map_reduce([values], 0, &{process_row(&1, process, fields), &2 + 1})
+        context = case :riakc_map.to_op(
+                        :riakc_map.update({"_dummy", :flag}, fn _ ->
+                          Riak.CRDT.Flag.new |> Riak.CRDT.Flag.enable end, map)) do
+                    {_, _, c} -> c
+                    _ -> :undefined
+                  end
+        {rows, count} = Enum.map_reduce([values], 0, &{process_row(&1, process, fields, context), &2 + 1})
         {count, rows}
     end
   end
@@ -194,13 +207,45 @@ defmodule Ecto.Adapters.RiakDT do
 
   ## Schema
 
-  def insert(_repo, %{source: {_, bucket}, schema: schema}, params, _returning, _options) do
+  def insert(_repo,
+        %{source: {_, bucket},
+          schema: schema,
+          context: context}, params, _returning, _options) do
     Logger.info("Insert, #{inspect params}")
     # m = to_crdt_map(params)
     # Logger.info("New Map, #{inspect m}")
     {type, bucket} = List.to_tuple(String.split(bucket, "."))
     [f] = dumpers({:embed, %{related: schema}}, nil)
+    params = case context do
+               %{map: c} ->
+                 [{:_context, c}|params]
+               _ ->
+                 params
+             end
     {:ok, map} = f.(Enum.into(params, %{}))
+    Logger.info("INSERT MAP: #{inspect map}")
+
+    # {:map, [], [
+    #     {{"active", :flag}, {:flag, false, :disable, :undefined}},
+    #     {{"body", :register}, {:register, "", "<html><body>The contents.</body></html>"}},
+    #     {{"id", :register}, {:register, "", "ccf05adc-2bd6-44a0-8747-dd13fb2804b8"}},
+    #     {{"permalink", :map}, {:map, [], [
+    #                               {{"id", :register}, {:register, "", "18f19984-aa8f-498e-9a36-f3d8bb64ed02"}},
+    #                               {{"url", :register}, {:register, "", "http://mysite.com/link"}}], [], :undefined}},
+    #     {{"tags", :set}, {:set, [], ["some_tag"], [], :undefined}},
+    #     {{"title", :register}, {:register, "", "My Post"}},
+    #     {{"views", :counter}, {:counter, 0, 1}}], [], :undefined}
+
+    # {:map, [], [
+    #     {{"active", :flag}, {:flag, false, :disable, :undefined}},
+    #     {{"body", :register}, {:register, "", "<html><body>The contents.</body></html>"}},
+    #     {{"id", :register}, {:register, "", "ccf05adc-2bd6-44a0-8747-dd13fb2804b8"}},
+    #     {{"permalink", :map}, {:map, [], [
+    #                               {{"id", :register}, {:register, "", "aa716b63-1016-413e-b38a-7ad1bfeb539d"}},
+    #                               {{"url", :register}, {:register, "", "http://mysite.com/link"}}], [], :undefined}},
+    #     {{"tags", :set}, {:set, [], ["some_tag"], [], :undefined}},
+    #     {{"title", :register}, {:register, "", "My Post"}},
+    #     {{"views", :counter}, {:counter, 1, 1}}], [], <<131, 108, 0, 0, 0, 1, 104, 2, 109, 0, 0, 0, 12, 35, 9, 254, 249, 224, 24, 101, 76, 0, 0, 39, 23, 97, 1, 106>>}
     case Riak.update(map, type, bucket, Keyword.get(params, :id)) do
       :ok -> {:ok, []};
       {:error, message} ->
@@ -260,8 +305,8 @@ defmodule Ecto.Adapters.RiakDT do
 
   ## Private
 
-  defp process_row(row, process, fields) do
-    Enum.map_reduce(fields, row, fn
+  defp process_row(row, process, fields, context) do
+    [h|_] = Enum.map_reduce(fields, row, fn
       {:&, _, [_, _, counter]} = field, acc ->
         case split_and_not_nil(acc, counter, true, []) do
           {nil, rest} -> {nil, rest}
@@ -270,6 +315,7 @@ defmodule Ecto.Adapters.RiakDT do
       field, [h|t] ->
         {process.(field, h, nil), t}
     end) |> elem(0)
+    [h |> Ecto.put_meta(context: %{map: context})]
   end
 
   defp split_and_not_nil(rest, 0, true, _acc), do: {nil, rest}
