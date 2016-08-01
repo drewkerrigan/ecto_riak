@@ -4,6 +4,7 @@ defmodule Ecto.Adapters.RiakDT do
   """
 
   require Record
+  require Logger
 
   @behaviour Ecto.Adapter
 
@@ -78,6 +79,8 @@ defmodule Ecto.Adapters.RiakDT do
           schema: schema,
           context: context}, params, _returning, _options) do
     types = schema.__schema__(:types)
+    indexes = schema.secondary_indexes
+    Logger.info("Indexes: #{inspect indexes}")
     map = to_crdt_map(params, types, context)
     {type, bucket} = List.to_tuple(String.split(bucket, "."))
     case Riak.update(map, type, bucket, Keyword.get(params, :id)) do

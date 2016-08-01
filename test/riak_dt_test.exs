@@ -16,14 +16,15 @@ defmodule EctoRiakDTTest do
   end
 
   defmodule Post do
-    use Ecto.Schema
+    use Ecto.Riak.Schema.TwoI
 
     @primary_key {:id, :binary_id, autogenerate: true}
+    @secondary_indexes [:title]
 
     schema "maps.posts" do
       field :title, :string
       field :body, :string
-      field :views, Counter
+      field :views, Counter #TODO also implement :integer impl
       field :active, :boolean
       field :tags, Set
       embeds_one :permalink, Permalink
