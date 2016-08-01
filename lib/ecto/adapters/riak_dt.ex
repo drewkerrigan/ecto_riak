@@ -3,7 +3,6 @@ defmodule Ecto.Adapters.RiakDT do
   Adapter module for Riak (KV).
   """
 
-  require Logger
   require Record
 
   @behaviour Ecto.Adapter
@@ -22,133 +21,12 @@ defmodule Ecto.Adapters.RiakDT do
 
   ## Types
 
-  def loaders(:binary_id, type), do: loaders(:string, type)
-  def loaders(:string, _type) do
-    [fn
-      rec when Record.is_record(rec, :register) ->
-      case :riakc_register.to_op(rec) do
-        :undefined ->
-          {:ok, Riak.CRDT.Register.value(rec)}
-        {_, {:assign, v}, _} ->
-          {:ok, v}
-      end
-      data ->
-        {:ok, data}
-    end]
-  end
-  def loaders({:array, :string}, _type) do
-    [fn
-      rec when Record.is_record(rec, :set) ->
-        {:ok, Riak.CRDT.Set.value(rec)}
-      data ->
-        {:ok, data}
-    end]
-  end
-  def loaders(:boolean, _type) do
-    [fn
-      rec when Record.is_record(rec, :flag) ->
-        {:ok, Riak.CRDT.Flag.value(rec)}
-      data ->
-        {:ok, data}
-    end]
-  end
-  def loaders({:embed, %{related: schema}}, type) do
-    types = schema.__schema__(:types)
-    [fn
-      rec when Record.is_record(rec, :map) ->
-        list = Enum.map(Riak.CRDT.Map.value(rec), fn
-          {{k_str, :counter}, v_rec} ->
-            {String.to_atom(k_str), :riakc_counter.new(v_rec, :undefined)}
-          {{k_str, :map}, v_rec} ->
-            {String.to_atom(k_str), :riakc_map.new(v_rec, :undefined)}
-          {{k_str, _}, v_rec} ->
-            {String.to_atom(k_str), v_rec}
-        end)
-      data = Enum.reduce(types, %{}, fn ({k, t}, a) ->
-        [f|_] = loaders(t, t)
-        raw = Keyword.get(list, k)
-        case f do
-          Ecto.Riak.Counter ->
-            Map.put(a, Atom.to_string(k), raw)
-          fun ->
-            {:ok, v} = f.(raw)
-            Map.put(a, Atom.to_string(k), v)
-        end
-      end)
-      Logger.info("Loaded map: #{inspect data}")
-      {:ok, data}
-      data ->
-        {:ok, data}
-    end, &load_embed(type, &1)]
-  end
   def loaders(_primitive, type), do: [type]
 
-  def load_embed(type, value) do
-    Ecto.Type.load(type, value, fn
-      {:embed, _} = type, value -> load_embed(type, value)
-      type, value -> Ecto.Type.cast(type, value)
-    end)
-  end
-
-  def dumpers(:binary_id, type), do: dumpers(:string, type)
-  def dumpers(:string, _type) do
-    [fn
-      rec when Record.is_record(rec, :register) ->
-        Logger.info("STRING DATA1: #{inspect rec}")
-        {:ok, rec}
-      data ->
-        Logger.info("STRING DATA2: #{inspect data}")
-        # {:ok, Riak.CRDT.Register.new |> Riak.CRDT.Register.set(data)}
-        {:ok, :riakc_register.new(data, :undefined)}
-    end]
-  end
-  def dumpers({:array, :string}, _type) do
-    [fn
-      rec when Record.is_record(rec, :set) ->
-        {:ok, rec}
-      data ->
-        o = Riak.CRDT.Set.new
-        {:ok, Enum.reduce(data, o, fn d, a -> Riak.CRDT.Set.put(a, d) end)}
-    end]
-  end
-  def dumpers(:boolean, _type) do
-    [fn
-      rec when Record.is_record(rec, :flag) ->
-        {:ok, rec}
-      true ->
-        {:ok, Riak.CRDT.Flag.new |> Riak.CRDT.Flag.enable}
-      false ->
-        {:ok, Riak.CRDT.Flag.new |> Riak.CRDT.Flag.disable}
-    end]
-  end
-  def dumpers({:embed, %{related: schema}}, _type) do
-    types = schema.__schema__(:types)
-    [fn
-      rec when Record.is_record(rec, :map) ->
-        {:ok, rec}
-      data ->
-        m = case Map.fetch(data, :_context) do
-              {:ok, c} -> :riakc_map.new(c)
-              _ -> Riak.CRDT.Map.new
-            end
-        data = Enum.reduce(types, m, fn ({k, t}, a) ->
-          [f] = dumpers(t, t)
-          {:ok, raw} = Map.fetch(data, k)
-          case f do
-            Ecto.Riak.Counter ->
-              Riak.CRDT.Map.put(a, Atom.to_string(k), raw)
-            fun ->
-              {:ok, v} = f.(raw)
-              Riak.CRDT.Map.put(a, Atom.to_string(k), v)
-          end
-        end)
-      {:ok, data}
-    end]
-  end
   def dumpers(_primitive, type), do: [type]
 
   def autogenerate(:id), do: nil
-  def autogenerate(:embed_id), do: :riakc_register.new(Ecto.UUID.autogenerate, :undefined)
+  def autogenerate(:embed_id), do: Ecto.UUID.autogenerate
   def autogenerate(:binary_id), do: Ecto.UUID.autogenerate
 
   ## Queryable
@@ -158,7 +36,6 @@ defmodule Ecto.Adapters.RiakDT do
   def execute(_repo,
         %{fields: fields},
         {:nocache, {:all, query}}, [], process, _options) do
-    Logger.info("Execute query")
     # case Riak.Timeseries.query(sql) do
     #   {_fields, []} -> {0, []};
     #   {:error, {_, message}} ->
@@ -173,30 +50,19 @@ defmodule Ecto.Adapters.RiakDT do
   def execute(_repo,
         %{fields: fields,
           sources: {{bucket, schema}}},
-        {:nocache, {:all, _query}}, params, process, _options) do
-    Logger.info("Execute get_by, params: #{inspect params}")
+        {:nocache, {:all, _query}}, [id], process, _options) do
     {type, bucket} = List.to_tuple(String.split(bucket, "."))
-    [f] = loaders(:binary_id, nil)
-    [id_reg] = params
-    {:ok, id} = f.(id_reg)
     case Riak.find(type, bucket, id) do
       {:error, message} ->
         raise ArgumentError, message;
       map ->
-        [f|_] = loaders({:embed, %{related: schema}}, nil)
-        {:ok, row} = f.(map)
         ordered_fields = schema.__schema__(:fields)
-        values = Enum.map(ordered_fields, fn f ->
-          Map.get(row, Atom.to_string(f))
-        end)
-        Logger.info("Values: #{inspect values}")
-        context = case :riakc_map.to_op(
-                        :riakc_map.update({"_dummy", :flag}, fn _ ->
-                          Riak.CRDT.Flag.new |> Riak.CRDT.Flag.enable end, map)) do
-                    {_, _, c} -> c
-                    _ -> :undefined
-                  end
-        {rows, count} = Enum.map_reduce([values], 0, &{process_row(&1, process, fields, context), &2 + 1})
+        types = schema.__schema__(:types)
+        row = from_crdt_map(map, types, ordered_fields)
+        values = Keyword.values(row)
+        {rows, count} = Enum.map_reduce(
+          [values], 0,
+          &{process_row(&1, process, fields, map), &2 + 1})
         {count, rows}
     end
   end
@@ -211,41 +77,9 @@ defmodule Ecto.Adapters.RiakDT do
         %{source: {_, bucket},
           schema: schema,
           context: context}, params, _returning, _options) do
-    Logger.info("Insert, #{inspect params}")
-    # m = to_crdt_map(params)
-    # Logger.info("New Map, #{inspect m}")
+    types = schema.__schema__(:types)
+    map = to_crdt_map(params, types, context)
     {type, bucket} = List.to_tuple(String.split(bucket, "."))
-    [f] = dumpers({:embed, %{related: schema}}, nil)
-    params = case context do
-               %{map: c} ->
-                 [{:_context, c}|params]
-               _ ->
-                 params
-             end
-    {:ok, map} = f.(Enum.into(params, %{}))
-    Logger.info("INSERT MAP: #{inspect map}")
-
-    # {:map, [], [
-    #     {{"active", :flag}, {:flag, false, :disable, :undefined}},
-    #     {{"body", :register}, {:register, "", "<html><body>The contents.</body></html>"}},
-    #     {{"id", :register}, {:register, "", "ccf05adc-2bd6-44a0-8747-dd13fb2804b8"}},
-    #     {{"permalink", :map}, {:map, [], [
-    #                               {{"id", :register}, {:register, "", "18f19984-aa8f-498e-9a36-f3d8bb64ed02"}},
-    #                               {{"url", :register}, {:register, "", "http://mysite.com/link"}}], [], :undefined}},
-    #     {{"tags", :set}, {:set, [], ["some_tag"], [], :undefined}},
-    #     {{"title", :register}, {:register, "", "My Post"}},
-    #     {{"views", :counter}, {:counter, 0, 1}}], [], :undefined}
-
-    # {:map, [], [
-    #     {{"active", :flag}, {:flag, false, :disable, :undefined}},
-    #     {{"body", :register}, {:register, "", "<html><body>The contents.</body></html>"}},
-    #     {{"id", :register}, {:register, "", "ccf05adc-2bd6-44a0-8747-dd13fb2804b8"}},
-    #     {{"permalink", :map}, {:map, [], [
-    #                               {{"id", :register}, {:register, "", "aa716b63-1016-413e-b38a-7ad1bfeb539d"}},
-    #                               {{"url", :register}, {:register, "", "http://mysite.com/link"}}], [], :undefined}},
-    #     {{"tags", :set}, {:set, [], ["some_tag"], [], :undefined}},
-    #     {{"title", :register}, {:register, "", "My Post"}},
-    #     {{"views", :counter}, {:counter, 1, 1}}], [], <<131, 108, 0, 0, 0, 1, 104, 2, 109, 0, 0, 0, 12, 35, 9, 254, 249, 224, 24, 101, 76, 0, 0, 39, 23, 97, 1, 106>>}
     case Riak.update(map, type, bucket, Keyword.get(params, :id)) do
       :ok -> {:ok, []};
       {:error, message} ->
@@ -255,7 +89,6 @@ defmodule Ecto.Adapters.RiakDT do
 
   def insert_all(_repo, %{source: {_, table}, schema: schema},
         _header, rows, returning, _options) do
-    Logger.info("Insert all")
     # fields = schema.__schema__(:fields)
     # tuple_rows = Enum.map rows, fn r -> convert_row(fields, r) end
     # case Riak.Timeseries.put(table, tuple_rows) do
@@ -278,17 +111,14 @@ defmodule Ecto.Adapters.RiakDT do
 
   # Notice the list of changes is never empty.
   def update(_repo, %{context: nil}, [_|_], _filters, return, _options) do
-    Logger.info("Update")
     # do: send(self(), :update) && {:ok, Enum.zip(return, 1..length(return))}
   end
 
   def update(_repo, %{context: {:invalid, _}=res}, [_|_], _filters, _return, _options) do
-    Logger.info("Update res")
     # do: res
   end
 
   def delete(_repo, %{source: {_, table}, schema: schema}, filter, _options) do
-    Logger.info("Delete")
     {:ok, []}
     # pk = schema.__schema__(:primary_key)
     # case to_pk(pk, filter, []) do
@@ -327,5 +157,142 @@ defmodule Ecto.Adapters.RiakDT do
 
   defp split_and_not_nil([h|t], count, _all_nil?, acc) do
     split_and_not_nil(t, count - 1, false, [h|acc])
+  end
+
+  # TODO: Move to another module
+  def from_crdt_map(map, types, fields) when Record.is_record(map, :map) do
+    Riak.CRDT.Map.value(map) |> from_crdt_map(types, fields)
+  end
+  def from_crdt_map(map_vals, types, fields) do
+    list = Enum.map(map_vals,
+      fn {{ck, ct}=crdt_key, v} ->
+        t = Map.get(types, String.to_atom(ck))
+        {crdt_key, t, v}
+      end)
+    |> from_crdt_map([])
+    Enum.map(fields, fn f ->
+      {f, Keyword.get(list, f)}
+    end)
+  end
+
+  def from_crdt_map([], acc) do
+    Enum.reverse(acc)
+  end
+  def from_crdt_map([{{k, :register}, _, v}|rest], acc) do
+    # from_crdt_map(rest, [{k, Riak.CRDT.Register.value(v)}|acc])
+    from_crdt_map(rest, [{String.to_atom(k), v}|acc])
+  end
+  def from_crdt_map([{{k, :flag}, _, v}|rest], acc) do
+    from_crdt_map(rest, [{String.to_atom(k), v}|acc])
+  end
+  def from_crdt_map([{{k, :counter}, Ecto.Riak.Counter, v}|rest], acc) do
+    from_crdt_map(rest, [{String.to_atom(k),
+                          :riakc_counter.new(v, :undefined)}|acc])
+  end
+  def from_crdt_map([{{k, :set}, Ecto.Riak.Set, v}|rest], acc) do
+    from_crdt_map(rest, [{String.to_atom(k),
+                          :riakc_set.new(v, :undefined)}|acc])
+  end
+  def from_crdt_map([{{k, :map}, {:embed, %{related: schema}}, v}|rest], acc) do
+    fields = schema.__schema__(:fields)
+    types = schema.__schema__(:types)
+    sub_map = from_crdt_map(v, types, fields)
+    |> Enum.map(fn {ik, iv} -> {Atom.to_string(ik), iv} end)
+    |> Enum.into(%{})
+    from_crdt_map(rest, [{String.to_atom(k), sub_map}|acc])
+  end
+
+  def to_crdt_key(k, :binary_id), do: {Atom.to_string(k), :register}
+  def to_crdt_key(k, :string), do: {Atom.to_string(k), :register}
+  def to_crdt_key(k, :boolean), do: {Atom.to_string(k), :flag}
+  def to_crdt_key(k, Ecto.Riak.Counter), do: {Atom.to_string(k), :counter}
+  def to_crdt_key(k, Ecto.Riak.Set), do: {Atom.to_string(k), :set}
+  def to_crdt_key(k, {:embed, _}), do: {Atom.to_string(k), :map}
+
+  def to_crdt_map(%{}=params, types, context) do
+    to_crdt_map(Map.to_list(params), types, context)
+  end
+  def to_crdt_map(params, types, %{map: map}) do
+    Enum.map(types, fn {k, t} ->
+      {ck, ct} = crdt_key = to_crdt_key(k, t)
+      old = Riak.CRDT.Map.get(map, ct, ck)
+      new = Keyword.get(params, k)
+      {crdt_key, t, old, new}
+    end) |> to_crdt_map(map)
+  end
+  def to_crdt_map(params, types, _) do
+    Enum.map(types, fn {k, t} ->
+      crdt_key = to_crdt_key(k, t)
+      {crdt_key, t, Keyword.get(params, k)}
+    end) |> to_crdt_map(Riak.CRDT.Map.new)
+  end
+
+  def to_crdt_map([], map) do
+    map
+  end
+  def to_crdt_map([{{k, :register}, _, v}|rest], map) do
+    to_crdt_map(rest,
+      Riak.CRDT.Map.put(map, k,
+        Riak.CRDT.Register.new
+        |> Riak.CRDT.Register.set(v)))
+  end
+  def to_crdt_map([{{_, :register}, _, old, old}|rest], map) do
+    to_crdt_map(rest, map)
+  end
+  def to_crdt_map([{{k, :register=t}, _, old, new}|rest], map) do
+    to_crdt_map(rest,
+      Riak.CRDT.Map.put(map, k, :riakc_register.new(old, :undefined)
+      |> Riak.CRDT.Register.set(new)))
+  end
+  def to_crdt_map([{{k, :flag}, _, true}|rest], map) do
+    to_crdt_map(rest,
+      Riak.CRDT.Map.put(map, k,
+        Riak.CRDT.Flag.new
+        |> Riak.CRDT.Flag.enable))
+  end
+  def to_crdt_map([{{k, :flag}, _, false}|rest], map) do
+    to_crdt_map(rest,
+      Riak.CRDT.Map.put(map, k,
+        Riak.CRDT.Flag.new
+        |> Riak.CRDT.Flag.disable))
+  end
+  def to_crdt_map([{{_, :flag}, _, old, old}|rest], map) do
+    to_crdt_map(rest, map)
+  end
+  def to_crdt_map([{{k, :flag=t}, _, old, true}|rest], map) do
+    to_crdt_map(rest,
+      Riak.CRDT.Map.put(map, k, :riakc_flag.new(old, :undefined)
+      |> Riak.CRDT.Flag.enable))
+  end
+  def to_crdt_map([{{k, :flag=t}, _, old, false}|rest], map) do
+    to_crdt_map(rest,
+      Riak.CRDT.Map.put(map, k, :riakc_flag.new(old, :undefined)
+      |> Riak.CRDT.Flag.disable))
+  end
+  def to_crdt_map([{{k, :set}, _, v}|rest], map) do
+    to_crdt_map(rest, Riak.CRDT.Map.put(map, k, v))
+  end
+  def to_crdt_map([{{k, :set}, et, _old, new}|rest], map) do
+    to_crdt_map([{{k, :set}, et, new}|rest], map)
+  end
+  def to_crdt_map([{{k, :counter}, _, v}|rest], map) do
+    to_crdt_map(rest, Riak.CRDT.Map.put(map, k, v))
+  end
+  def to_crdt_map([{{k, :counter}, et, _old, new}|rest], map) do
+    to_crdt_map([{{k, :counter}, et, new}|rest], map)
+  end
+  def to_crdt_map([{{k, :map}, {:embed, %{related: schema}},
+                    v}|rest], map) do
+    types = schema.__schema__(:types)
+    to_crdt_map(rest, Riak.CRDT.Map.put(map, k,
+          to_crdt_map(v, types, nil)))
+  end
+  def to_crdt_map([{{k, :map},
+                    {:embed, %{related: schema}=embed}, old, new}|rest], map) do
+    types = schema.__schema__(:types)
+    to_crdt_map(rest,
+      Riak.CRDT.Map.put(map, k,
+        to_crdt_map(new, types,
+          %{map: :riakc_map.new(old, :undefined)})))
   end
 end

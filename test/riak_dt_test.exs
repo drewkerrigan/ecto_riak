@@ -1,20 +1,9 @@
 defmodule EctoRiakDTTest do
   use EctoRiak.Case
   require EctoRiak.RiakDTRepo, as: RiakDTRepo
-  require Logger
 
   alias Ecto.Riak.Counter
-  # alias Ecto.Riak.Flag
-  # alias Ecto.Riak.Set
-  # alias Ecto.Riak.Register
-
-  # defmodule MyMapSchema do
-  #   use Ecto.Schema
-
-  #   schema "maps/testbucket" do
-  #     field :mycounter, Counter
-  #   end
-  # end
+  alias Ecto.Riak.Set
 
   defmodule Permalink do
     use Ecto.Schema
@@ -36,7 +25,7 @@ defmodule EctoRiakDTTest do
       field :body, :string
       field :views, Counter
       field :active, :boolean
-      field :tags, {:array, :string}
+      field :tags, Set
       embeds_one :permalink, Permalink
     end
   end
@@ -50,22 +39,29 @@ defmodule EctoRiakDTTest do
       body: "<html><body>The contents.</body></html>",
       views: Counter.new |> Counter.increment(1),
       active: false,
-      tags: ["some_tag"],
+      tags: Set.new |> Set.put("some_tag"),
       permalink: link
     }
+
 
     inserted_obj = RiakDTRepo.insert!(obj)
     assert "http://mysite.com/link" == inserted_obj.permalink.url
 
-    returned_row = RiakDTRepo.get(Post, inserted_obj.id)
 
-    Logger.info("returned: #{inspect returned_row}")
+    returned_row = RiakDTRepo.get(Post, inserted_obj.id)
     assert obj.active == returned_row.active
 
-    updated_row = %{returned_row | views: returned_row.views |> Counter.increment(1)}
-    Logger.info("updated: #{inspect updated_row}")
+    updated_row = %{returned_row |
+                    views: returned_row.views |> Counter.increment(1),
+                    active: true,
+                    tags: returned_row.tags |> Set.put("another_tag"),
+                    permalink: %{returned_row.permalink |
+                                 id: returned_row.permalink.id,
+                                 url: "http://anothersite.com/link"}}
 
     RiakDTRepo.insert!(updated_row)
+    returned_row = RiakDTRepo.get(Post, returned_row.id)
+    assert true == returned_row.active
 
     # assert {2, nil} == RiakDTRepo.insert_all(MySchema,
     #   [%{region: "myregion2",
