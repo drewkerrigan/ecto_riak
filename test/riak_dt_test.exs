@@ -1,6 +1,8 @@
 defmodule EctoRiakDTTest do
   use EctoRiak.Case
   require EctoRiak.RiakDTRepo, as: RiakDTRepo
+  require Logger
+  import Ecto.Query
 
   alias Ecto.Riak.Counter
   alias Ecto.Riak.Set
@@ -16,10 +18,9 @@ defmodule EctoRiakDTTest do
   end
 
   defmodule Post do
-    use Ecto.Riak.Schema.TwoI
+    use Ecto.Riak.Schema
 
     @primary_key {:id, :binary_id, autogenerate: true}
-    @secondary_indexes [:title]
 
     schema "maps.posts" do
       field :title, :string
@@ -27,6 +28,7 @@ defmodule EctoRiakDTTest do
       field :views, Counter #TODO also implement :integer impl
       field :active, :boolean
       field :tags, Set
+      term_index :tags, "sets.posts_index"
       embeds_one :permalink, Permalink
     end
   end
@@ -64,39 +66,46 @@ defmodule EctoRiakDTTest do
     returned_row = RiakDTRepo.get(Post, returned_row.id)
     assert true == returned_row.active
 
-    # assert {2, nil} == RiakDTRepo.insert_all(MySchema,
-    #   [%{region: "myregion2",
-    #      state: "mystate2",
-    #      time: 123457,
-    #      weather: "windy",
-    #      temperature: 55.0},
-    #    %{region: "myregion3",
-    #      state: "mystate3",
-    #      time: 123458,
-    #      weather: "rainy",
-    #      temperature: 45.0}])
-    # returned_row = RiakDTRepo.get_by(MySchema, region: "myregion", state: "mystate", time: 123456)
+    assert {2, nil} == RiakDTRepo.insert_all(Post,
+      [%{
+          title: "My Post2",
+          body: "<html><body>The contents.</body></html>",
+          views: Counter.new |> Counter.increment(1),
+          active: false,
+          tags: Set.new |> Set.put("some_tag"),
+          permalink: link
+       },
+       %{
+         title: "My Post3",
+         body: "<html><body>The contents.</body></html>",
+         views: Counter.new |> Counter.increment(1),
+         active: false,
+         tags: Set.new |> Set.put("some_tag"),
+         permalink: link
+       }])
+
+    # returned_rows = RiakDTRepo.get_by(Post, tags: Set.new |> Set.put("some_tag"))
+    
     # assert row.region == returned_row.region
     # deleted_row = RiakDTRepo.delete!(row)
     # assert :deleted == deleted_row.__meta__.state
   end
 
-  # test "queries" do
-  #   %MySchema{
-  #     region: "myregion",
-  #     state: "mystate",
-  #     time: 123456,
-  #     weather: "sunny",
-  #     temperature: 65.0
-  #   }
-  #   |> RiakDTRepo.insert!
-  #   query = from(e in MySchema, where:
-  #     e.region == "myregion" and
-  #     e.state == "mystate" and
-  #     e.time > 123455 and
-  #     e.time < 123459)
+  test "queries" do
+    # %MySchema{
+    #   region: "myregion",
+    #   state: "mystate",
+    #   time: 123456,
+    #   weather: "sunny",
+    #   temperature: 65.0
+    # }
+    # |> RiakDTRepo.insert!
+    tags = Set.new |> Set.put("some_tag")
+    query = from(e in Post,
+      where: e.tags == ^tags)
 
-  #   [result] = RiakDTRepo.all(query)
-  #   assert "myregion" == result.region
-  # end
+    results = RiakDTRepo.all(query)
+    Logger.info("Found rows by some_tag: #{inspect results}")
+    # assert "myregion" == result.region
+  end
 end

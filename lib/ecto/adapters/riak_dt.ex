@@ -29,6 +29,7 @@ defmodule Ecto.Adapters.RiakDT do
   def autogenerate(:id), do: nil
   def autogenerate(:embed_id), do: Ecto.UUID.autogenerate
   def autogenerate(:binary_id), do: Ecto.UUID.autogenerate
+  def autogenerate(any), do: "hello"
 
   ## Queryable
 
@@ -37,6 +38,7 @@ defmodule Ecto.Adapters.RiakDT do
   def execute(_repo,
         %{fields: fields},
         {:nocache, {:all, query}}, [], process, _options) do
+    Logger.info("all query: #{inspect query}")
     # case Riak.Timeseries.query(sql) do
     #   {_fields, []} -> {0, []};
     #   {:error, {_, message}} ->
@@ -48,10 +50,22 @@ defmodule Ecto.Adapters.RiakDT do
     {0, nil}
   end
 
-  def execute(_repo,
+  def execute(repo, meta,{:nocache,{:all,query}}=q, params, process, options) do
+    case simple_where(query, params) do
+      {:id, id} -> get_by_id(repo, meta, q, params, process, options)
+      _ -> get_by_term(repo, meta, q, params, process, options)
+    end
+  end
+
+  def execute(_, _, _, _, _) do
+    {:error, "Not implemented"}
+  end
+
+  def get_by_id(_repo,
         %{fields: fields,
           sources: {{bucket, schema}}},
         {:nocache, {:all, _query}}, [id], process, _options) do
+    Logger.info("Get By Id: #{inspect id}")
     {type, bucket} = List.to_tuple(String.split(bucket, "."))
     case Riak.find(type, bucket, id) do
       {:error, message} ->
@@ -68,48 +82,106 @@ defmodule Ecto.Adapters.RiakDT do
     end
   end
 
-  def execute(_, _, _, _, _) do
-    {:error, "Not implemented"}
+  def get_by_term(repo, %{sources: {{_, schema}}}=meta,
+        {:nocache, {:all, query}}=q, params,
+        process, options) do
+    {k, v} = simple_where(query, params)
+    Logger.info("Query by #{inspect k}, #{inspect v}")
+    term_bucket = Keyword.get(schema.term_indexes, k)
+    types = schema.__schema__(:types)
+    {type, bucket} = List.to_tuple(String.split(term_bucket, "."))
+    id = to_term_key(v, Map.get(types, k))
+    Logger.info("Term Key #{id}")
+    case Riak.find(type, bucket, id) do
+      {:error, message} ->
+        raise ArgumentError, message;
+      set ->
+        ids = Riak.CRDT.Set.value(set)
+        {c, r} = Enum.reduce(ids, {0, []}, fn id, {c0, r0} ->
+          {count, rows} = get_by_id(repo, meta, q, [id], process, options)
+          {count + c0, r0 ++ rows}
+        end)
+        {c, r}
+    end
+  end
+
+  def simple_where(
+        %Ecto.Query{
+          wheres:
+          [%Ecto.Query.QueryExpr{
+              expr: {:==, _, [{{_, _, [_, k]}, _, _}, {:^, [], [0]}]}}]}, [v]) do
+    {k, v}
+  end
+  def simple_where(_, [v]) do
+    {:id, v}
+  end
+
+  def to_term_key(set, Ecto.Riak.Set) do
+    case :riakc_set.to_op(set) do
+      :undefined -> Riak.CRDT.Set.value(set)
+      {_, {:add_all, [id]}, _} -> id
+      {_, {:update, [{_, _}, {:add_all, [id]}]}, _} -> id
+    end
   end
 
   ## Schema
+
+  def build_index(bucket, items, Ecto.Riak.Set, id) do
+    {type, bucket} = List.to_tuple(String.split(bucket, "."))
+    Enum.reduce(Riak.CRDT.Set.value(items), :ok, fn (i, a) ->
+
+      set = case Riak.find(type, bucket, i) do
+              set when Record.is_record(:set) ->
+                set
+              _ ->
+                Riak.CRDT.Set.new
+            end
+
+      case Riak.CRDT.Set.put(set, id) |> Riak.update(type, bucket, i) do
+        :ok -> a
+        e -> e
+      end
+    end)
+  end
 
   def insert(_repo,
         %{source: {_, bucket},
           schema: schema,
           context: context}, params, _returning, _options) do
     types = schema.__schema__(:types)
-    indexes = schema.secondary_indexes
-    Logger.info("Indexes: #{inspect indexes}")
     map = to_crdt_map(params, types, context)
+    term_indexes = schema.term_indexes
+    id = Keyword.get(params, :id)
+
     {type, bucket} = List.to_tuple(String.split(bucket, "."))
-    case Riak.update(map, type, bucket, Keyword.get(params, :id)) do
-      :ok -> {:ok, []};
+    case Riak.update(map, type, bucket, id) do
+      :ok ->
+        case term_indexes do
+          [] ->
+            {:ok, []};
+          [_|_] ->
+            Enum.reduce(term_indexes, {:ok, []}, fn {n, b}, a ->
+              case build_index(b, Keyword.get(params, n), Map.get(types, n), id) do
+                :ok -> a
+                {:error, message} ->
+                  raise ArgumentError, message
+              end
+            end)
+        end
       {:error, message} ->
         raise ArgumentError, message
     end
   end
 
-  def insert_all(_repo, %{source: {_, table}, schema: schema},
-        _header, rows, returning, _options) do
-    # fields = schema.__schema__(:fields)
-    # tuple_rows = Enum.map rows, fn r -> convert_row(fields, r) end
-    # case Riak.Timeseries.put(table, tuple_rows) do
-    #   :ok ->
-    #     case returning do
-    #       [] ->
-    #         {length(rows), nil}
-    #       return_fields ->
-    #         return_values = Enum.map rows, fn r ->
-    #           Enum.map return_fields, fn f ->
-    #             {f, r[f]}
-    #           end
-    #         end
-    #         {length(rows), return_values}
-    #     end
-    #   {:error, {_, message}} -> {:invalid, message}
-    # end
-    {0, nil}
+  def insert_all(repo, meta,
+        _header, rows, returning, options) do
+    Logger.info("Insert All: #{inspect rows}")
+    Enum.reduce(rows, {0, []}, fn r, {c, a} ->
+      case insert(repo, meta, r, returning, options) do
+        {:ok, _} -> {c+1, nil};
+        _ -> {c, nil}
+      end
+    end)
   end
 
   # Notice the list of changes is never empty.
@@ -232,6 +304,12 @@ defmodule Ecto.Adapters.RiakDT do
 
   def to_crdt_map([], map) do
     map
+  end
+  def to_crdt_map([{{k, :register}, _, nil}|rest], map) do
+    to_crdt_map(rest,
+      Riak.CRDT.Map.put(map, k,
+        Riak.CRDT.Register.new
+        |> Riak.CRDT.Register.set("")))
   end
   def to_crdt_map([{{k, :register}, _, v}|rest], map) do
     to_crdt_map(rest,
